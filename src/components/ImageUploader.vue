@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 
-const emit = defineEmits('upload')
+const emit = defineEmits(['upload'])
 
 const inputEl = ref(null)
 const dragging = ref(false)

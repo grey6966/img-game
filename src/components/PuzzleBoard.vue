@@ -1,14 +1,18 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
 const props = defineProps({
   imageUrl: { type: String, required: true },
   size: { type: Number, required: true },
   pieces: { type: Array, required: true },
-  solved: { type: Boolean, default: false }
+  solved: { type: Boolean, default: false },
+  paused: { type: Boolean, default: false },
+  // 提示：需要高亮的格子下标列表（错位块）及其正确目标
+  hintCells: { type: Array, default: () => [] },
+  hintTargets: { type: Object, default: () => ({}) }
 })
 
-const emit = defineEmits(['swap'])
+const emit = defineEmits(['swap', 'resume'])
 
 const selected = ref(-1)
 const dragIndex = ref(-1)
@@ -34,8 +38,15 @@ function isCorrect(index) {
   return props.pieces[index] === index
 }
 
+watch(
+  () => props.solved,
+  v => {
+    if (v) selected.value = -1
+  }
+)
+
 function handleClick(index) {
-  if (props.solved || dragging.value) return
+  if (props.solved || props.paused || dragging.value) return
   if (selected.value === -1) {
     selected.value = index
     return
@@ -49,14 +60,14 @@ function handleClick(index) {
 }
 
 function onPointerDown(e, index) {
-  if (props.solved) return
+  if (props.solved || props.paused) return
   pointerStart.value = { x: e.clientX, y: e.clientY, index }
   dragIndex.value = -1
   dragging.value = false
 }
 
 function onPointerMove(e) {
-  if (!pointerStart.value) return
+  if (!pointerStart.value || props.paused) return
   const dx = e.clientX - pointerStart.value.x
   const dy = e.clientY - pointerStart.value.y
   if (!dragging.value && Math.hypot(dx, dy) > 8) {
@@ -73,7 +84,7 @@ function onPointerMove(e) {
 
 function onPointerUp() {
   if (dragging.value && dragIndex.value !== -1 && dragOverIndex.value !== -1 &&
-      dragOverIndex.value !== dragIndex.value) {
+      dragOverIndex.value !== dragIndex.value && !props.paused) {
     emit('swap', dragIndex.value, dragOverIndex.value)
   }
   pointerStart.value = null
@@ -92,9 +103,10 @@ function onPointerUp() {
   >
     <div
       class="board"
+      :class="{ merged: solved }"
       :style="{
         gridTemplateColumns: `repeat(${size}, 1fr)`,
-        gap: gap + 'px'
+        gap: solved ? '0px' : gap + 'px'
       }"
     >
       <div
@@ -106,21 +118,31 @@ function onPointerUp() {
           selected: selected === index,
           dragging: dragIndex === index,
           'drag-over': dragOverIndex === index && dragIndex !== index,
-          correct: solved || isCorrect(index)
+          correct: solved || isCorrect(index),
+          'hint-wrong': !solved && hintCells.includes(index),
+          'hint-target': !solved && hintTargets[index] !== undefined
         }"
         :style="bgPosition(pieceId)"
         @click="handleClick(index)"
         @pointerdown="(e) => onPointerDown(e, index)"
       >
         <span v-if="!solved && size <= 4" class="tile-num">{{ pieceId + 1 }}</span>
+        <span
+          v-if="!solved && hintTargets[index] !== undefined"
+          class="hint-arrow"
+        >➜</span>
       </div>
 
-      <div v-if="solved" class="win-mask">
-        <div class="win-emoji">🎉</div>
-        <p>拼图完成！</p>
-      </div>
+      <!-- 暂停遮罩：盖住拼图，防止偷看参考排布 -->
+      <Transition name="fade">
+        <div v-if="paused && !solved" class="pause-mask" @click="emit('resume')">
+          <div class="pause-icon">⏸</div>
+          <p class="pause-title">已暂停</p>
+          <p class="pause-hint">计时已停止 · 点击继续</p>
+        </div>
+      </Transition>
     </div>
-    <p class="board-tip">点击两块进行交换，或拖动一块到目标位置</p>
+    <p class="board-tip">点击两块交换，或拖动一块到目标位置</p>
   </div>
 </template>
 
@@ -143,6 +165,13 @@ function onPointerUp() {
   touch-action: none;
 }
 
+/* 完成时合拢：去掉间隙与内边距 */
+.board.merged {
+  gap: 0;
+  padding: 0;
+  background: transparent;
+}
+
 .tile {
   position: relative;
   border-radius: 6px;
@@ -151,7 +180,24 @@ function onPointerUp() {
   cursor: pointer;
   overflow: hidden;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
-  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease,
+    border-radius 0.5s ease;
+}
+
+.board.merged .tile {
+  border-radius: 0;
+  box-shadow: none;
+  transition: border-radius 0.5s ease;
+}
+
+.board.merged .tile:first-child {
+  border-radius: 10px 0 0 0;
+}
+.board.merged .tile:last-child {
+  border-radius: 0 0 10px 0;
 }
 
 .tile:hover {
@@ -175,8 +221,42 @@ function onPointerUp() {
 }
 
 .tile.correct {
-  /* 位置正确时加细微高光 */
   box-shadow: inset 0 0 0 1px rgba(46, 204, 143, 0.45);
+}
+
+/* 提示高亮：错位块用金色脉冲，目标块用绿色描边 + 箭头 */
+.tile.hint-wrong {
+  animation: hint-pulse 0.9s ease-in-out infinite;
+  z-index: 2;
+}
+
+.tile.hint-target {
+  box-shadow: 0 0 0 3px var(--success), 0 0 16px rgba(46, 204, 143, 0.6);
+  z-index: 2;
+}
+
+.hint-arrow {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  animation: pop 0.3s ease;
+}
+
+@keyframes hint-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px #ffb703, 0 0 10px rgba(255, 183, 3, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 4px #ffd166, 0 0 22px rgba(255, 183, 3, 0.9);
+  }
 }
 
 .tile-num {
@@ -195,30 +275,50 @@ function onPointerUp() {
   pointer-events: none;
 }
 
-.win-mask {
+.pause-mask {
   position: absolute;
-  inset: 4px;
-  border-radius: 8px;
-  background: rgba(20, 24, 50, 0.55);
+  inset: 0;
+  z-index: 5;
+  border-radius: 10px;
+  background: rgba(20, 24, 50, 0.82);
+  backdrop-filter: blur(6px);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   color: #fff;
-  font-size: 22px;
-  font-weight: 800;
-  animation: pop 0.35s ease;
+  cursor: pointer;
 }
 
-.win-emoji {
-  font-size: 48px;
+.pause-icon {
+  font-size: 44px;
+}
+
+.pause-title {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.pause-hint {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 @keyframes pop {
   from {
     opacity: 0;
-    transform: scale(0.9);
+    transform: scale(0.6);
   }
   to {
     opacity: 1;
