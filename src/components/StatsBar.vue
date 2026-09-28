@@ -1,7 +1,9 @@
 <script setup>
 defineProps({
   seconds: { type: Number, default: 0 },
-  moves: { type: Number, default: 0 }
+  moves: { type: Number, default: 0 },
+  bestTime: { type: Number, default: null },
+  bestMoves: { type: Number, default: null }
 })
 
 function formatTime(total) {
@@ -28,6 +30,16 @@ function formatTime(total) {
         <div class="stat-name">步数</div>
       </div>
     </div>
+    <div class="stat-divider"></div>
+    <div class="stat-item">
+      <span class="stat-icon">🏅</span>
+      <div>
+        <div class="stat-value stat-best">
+          {{ bestTime == null ? '--:--' : formatTime(bestTime) }}
+        </div>
+        <div class="stat-name">最佳 {{ bestMoves == null ? '' : `· ${bestMoves}步` }}</div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -36,7 +48,7 @@ function formatTime(total) {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 26px;
+  gap: 22px;
   padding: 4px 0;
 }
 
@@ -56,9 +68,14 @@ function formatTime(total) {
   font-variant-numeric: tabular-nums;
 }
 
+.stat-best {
+  color: #d99a00;
+}
+
 .stat-name {
   font-size: 12px;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .stat-divider {

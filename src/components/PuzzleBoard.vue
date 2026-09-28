@@ -5,7 +5,10 @@ const props = defineProps({
   imageUrl: { type: String, required: true },
   size: { type: Number, required: true },
   pieces: { type: Array, required: true },
-  solved: { type: Boolean, default: false }
+  solved: { type: Boolean, default: false },
+  paused: { type: Boolean, default: false },
+  // 提示高亮的格子索引（位置），闪烁提示其应放的块
+  hintCells: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['swap'])
@@ -15,8 +18,6 @@ const dragIndex = ref(-1)
 const dragOverIndex = ref(-1)
 const pointerStart = ref(null)
 const dragging = ref(false)
-
-const gap = 3 // px between tiles
 
 function bgPosition(id) {
   const row = Math.floor(id / props.size)
@@ -34,8 +35,12 @@ function isCorrect(index) {
   return props.pieces[index] === index
 }
 
+function interactive() {
+  return !props.solved && !props.paused
+}
+
 function handleClick(index) {
-  if (props.solved || dragging.value) return
+  if (!interactive() || dragging.value) return
   if (selected.value === -1) {
     selected.value = index
     return
@@ -49,14 +54,14 @@ function handleClick(index) {
 }
 
 function onPointerDown(e, index) {
-  if (props.solved) return
+  if (!interactive()) return
   pointerStart.value = { x: e.clientX, y: e.clientY, index }
   dragIndex.value = -1
   dragging.value = false
 }
 
 function onPointerMove(e) {
-  if (!pointerStart.value) return
+  if (!pointerStart.value || props.paused) return
   const dx = e.clientX - pointerStart.value.x
   const dy = e.clientY - pointerStart.value.y
   if (!dragging.value && Math.hypot(dx, dy) > 8) {
@@ -73,7 +78,7 @@ function onPointerMove(e) {
 
 function onPointerUp() {
   if (dragging.value && dragIndex.value !== -1 && dragOverIndex.value !== -1 &&
-      dragOverIndex.value !== dragIndex.value) {
+      dragOverIndex.value !== dragIndex.value && !props.paused) {
     emit('swap', dragIndex.value, dragOverIndex.value)
   }
   pointerStart.value = null
@@ -92,9 +97,10 @@ function onPointerUp() {
   >
     <div
       class="board"
+      :class="{ merged: solved }"
       :style="{
         gridTemplateColumns: `repeat(${size}, 1fr)`,
-        gap: gap + 'px'
+        gap: solved ? '0px' : '3px'
       }"
     >
       <div
@@ -106,13 +112,20 @@ function onPointerUp() {
           selected: selected === index,
           dragging: dragIndex === index,
           'drag-over': dragOverIndex === index && dragIndex !== index,
-          correct: solved || isCorrect(index)
+          correct: solved || isCorrect(index),
+          hint: hintCells.includes(index)
         }"
         :style="bgPosition(pieceId)"
         @click="handleClick(index)"
         @pointerdown="(e) => onPointerDown(e, index)"
       >
         <span v-if="!solved && size <= 4" class="tile-num">{{ pieceId + 1 }}</span>
+      </div>
+
+      <!-- 暂停遮罩：遮住拼图并阻止交互 -->
+      <div v-if="paused && !solved" class="pause-mask">
+        <div class="pause-emoji">⏸️</div>
+        <p>已暂停</p>
       </div>
 
       <div v-if="solved" class="win-mask">
@@ -141,6 +154,12 @@ function onPointerUp() {
   border-radius: 10px;
   padding: 4px;
   touch-action: none;
+  transition: gap 0.5s ease, padding 0.5s ease;
+}
+
+.board.merged {
+  padding: 0;
+  border-radius: 10px;
 }
 
 .tile {
@@ -151,7 +170,15 @@ function onPointerUp() {
   cursor: pointer;
   overflow: hidden;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
-  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease,
+    border-radius 0.5s ease;
+}
+
+.board.merged .tile {
+  border-radius: 0;
 }
 
 .tile:hover {
@@ -175,8 +202,24 @@ function onPointerUp() {
 }
 
 .tile.correct {
-  /* 位置正确时加细微高光 */
   box-shadow: inset 0 0 0 1px rgba(46, 204, 143, 0.45);
+}
+
+.tile.hint {
+  animation: hint-pulse 0.7s ease-in-out 3;
+  z-index: 3;
+}
+
+@keyframes hint-pulse {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 2px rgba(255, 209, 102, 0.9);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px #ffd166,
+      0 0 18px rgba(255, 209, 102, 0.8);
+  }
 }
 
 .tile-num {
@@ -195,11 +238,11 @@ function onPointerUp() {
   pointer-events: none;
 }
 
+.pause-mask,
 .win-mask {
   position: absolute;
-  inset: 4px;
-  border-radius: 8px;
-  background: rgba(20, 24, 50, 0.55);
+  inset: 0;
+  border-radius: 10px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -208,9 +251,20 @@ function onPointerUp() {
   color: #fff;
   font-size: 22px;
   font-weight: 800;
-  animation: pop 0.35s ease;
+  animation: pop 0.3s ease;
+  z-index: 5;
 }
 
+.pause-mask {
+  background: rgba(20, 24, 50, 0.78);
+  backdrop-filter: blur(3px);
+}
+
+.win-mask {
+  background: rgba(20, 24, 50, 0.55);
+}
+
+.pause-emoji,
 .win-emoji {
   font-size: 48px;
 }
@@ -218,7 +272,7 @@ function onPointerUp() {
 @keyframes pop {
   from {
     opacity: 0;
-    transform: scale(0.9);
+    transform: scale(0.96);
   }
   to {
     opacity: 1;

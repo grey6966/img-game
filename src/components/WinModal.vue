@@ -3,10 +3,14 @@ defineProps({
   show: { type: Boolean, default: false },
   seconds: { type: Number, default: 0 },
   moves: { type: Number, default: 0 },
-  size: { type: Number, default: 3 }
+  size: { type: Number, default: 3 },
+  record: {
+    type: Object,
+    default: () => ({ time: false, moves: false })
+  }
 })
 
-const emit = defineEmits(['restart', 'change-image'])
+const emit = defineEmits(['restart', 'change-image', 'close'])
 
 function formatTime(total) {
   const m = String(Math.floor(total / 60)).padStart(2, '0')
@@ -17,19 +21,24 @@ function formatTime(total) {
 
 <template>
   <Transition name="fade">
-    <div v-if="show" class="modal-overlay" @click.self="emit('restart')">
+    <div v-if="show" class="modal-overlay" @click.self="emit('close')">
       <div class="modal">
         <div class="modal-emoji">🏆</div>
         <h2 class="modal-title">恭喜完成！</h2>
         <p class="modal-sub">{{ size }} × {{ size }} 拼图挑战成功</p>
+
+        <div v-if="record.time || record.moves" class="new-record">
+          🎊 新纪录：{{ record.time ? '最快用时' : '' }}{{ record.time && record.moves ? ' · ' : '' }}{{ record.moves ? '最少步数' : '' }}！
+        </div>
+
         <div class="modal-stats">
-          <div class="modal-stat">
+          <div class="modal-stat" :class="{ record: record.time }">
             <span class="num">{{ formatTime(seconds) }}</span>
-            <span class="label">用时</span>
+            <span class="label">用时{{ record.time ? ' 👑' : '' }}</span>
           </div>
-          <div class="modal-stat">
+          <div class="modal-stat" :class="{ record: record.moves }">
             <span class="num">{{ moves }}</span>
-            <span class="label">步数</span>
+            <span class="label">步数{{ record.moves ? ' 👑' : '' }}</span>
           </div>
         </div>
         <div class="modal-actions">
@@ -49,7 +58,7 @@ function formatTime(total) {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 50;
+  z-index: 100;
   padding: 20px;
 }
 
@@ -78,6 +87,17 @@ function formatTime(total) {
   color: var(--muted);
 }
 
+.new-record {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #fff4d6, #ffe3ec);
+  color: #c27803;
+  font-size: 13px;
+  font-weight: 700;
+  animation: pop 0.4s ease;
+}
+
 .modal-stats {
   display: flex;
   justify-content: center;
@@ -89,6 +109,10 @@ function formatTime(total) {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.modal-stat.record .num {
+  color: #d99a00;
 }
 
 .modal-stat .num {
@@ -110,6 +134,17 @@ function formatTime(total) {
 
 .modal-actions .btn {
   flex: 1;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .fade-enter-active,
